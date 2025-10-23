@@ -14,6 +14,7 @@ FC_TEST2 = 25e3 # Outside passband
 PORT = 8080
 SERVER_IP = "127.0.0.1"
 
+
 def calculate_correct_filter():
     """Calculate what the filter coefficients SHOULD be"""
     h_causal = np.zeros(2 * N, dtype=np.float32)
@@ -706,11 +707,25 @@ def final_verification():
     finally:
         sock.close()
 
+def timed_test(test_func):
+    print(f"\nRunning {test_func.__name__}...")
+    start_time = time.perf_counter()
+    result = test_func()
+    end_time = time.perf_counter()
+    elapsed_ms = (end_time - start_time) * 1000
+    print(f"{test_func.__name__} completed in {elapsed_ms:.2f} ms")
+    return result
+
 if __name__ == "__main__":
     print("Make sure the C++ server is running on port 8080!")
     print("Press Enter to start tests...")
     input()
     
+    timed_test(test_basic_functionality)
+    timed_test(test_impulse_response)
+    timed_test(test_packet_continuity)
+    timed_test(quick_frequency_test)
+
     test_basic_functionality()
     test_impulse_response()      # This will reveal the sinc function error
     test_packet_continuity()
@@ -733,7 +748,14 @@ if __name__ == "__main__":
     test_circular_buffer() 
     final_verification()
     
-    print("\n=== Summary ===")
-    print("If impulse response test fails: Check sinc function implementation")
-    print("If continuity test fails: Check filter state management") 
-    print("If frequency test fails: Check filter coefficients")
+    print("\n=== High Level FIR Filter Resource Usage Summary ===")
+    print(f"Filter Length (Number of Taps): {2*N}")
+    print(f"Per Output Sample Resources:")
+    print(f" - Memory Loads from Delay Line: {2*N}")
+    print(f" - Memory Loads of Coefficients: {2*N}")
+    print(f" - Multiply Operations: {2*N}")
+    print(f" - Additions (Accumulator): {2*N - 1}")
+    print(f" - Modulo/Bitwise Operations: 1 (write index wrap)")
+    print(f"Additional Storage:")
+    print(f" - Delay line buffer: {2*N} floats")
+    print(f" - Coefficients array: {2*N} floats")
