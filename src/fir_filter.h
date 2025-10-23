@@ -27,7 +27,12 @@ public:
     void reset();
 
     std::vector<float> getCoefficients() const { 
-        return coefficients;
+        std::vector<float> full_coeffs(FILTER_LENGTH);
+        for (int i = 0; i < FILTER_LENGTH / 2; i++) {
+            full_coeffs[i] = coefficients[i];
+            full_coeffs[FILTER_LENGTH - 1 - i] = coefficients[i];
+        }
+        return full_coeffs;
     }
 };
 
