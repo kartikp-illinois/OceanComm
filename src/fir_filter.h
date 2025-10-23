@@ -7,6 +7,7 @@
 class FIRFilter {
 private:
     static constexpr int FILTER_LENGTH = 32; // total taps
+    static constexpr int Filter_Mask = FILTER_LENGTH - 1; // for circular buffer indexing
     static constexpr int N = 16;             // half the filter length
     static constexpr double FS = 100e3;      // Sampling frequency
     static constexpr double B = 10e3;        // Bandwidth
