@@ -9,542 +9,283 @@ import time
 FS = 100e3
 B = 10e3  
 N = 16
-FC_TEST = 1e3   # In passband
-FC_TEST2 = 25e3 # Outside passband
 PORT = 8080
 SERVER_IP = "127.0.0.1"
 
-
 def calculate_correct_filter():
     """Calculate what the filter coefficients SHOULD be"""
-    h_causal = np.zeros(2 * N, dtype=np.float32)
-    
+    h = np.zeros(2 * N, dtype=np.float32)
     for i in range(2 * N):
-        n_val = i - N  # -16 to 15
-
+        n_val = i - N
         sinc_arg = 2 * np.pi * (B / FS) * (n_val + 0.5)
         if abs(sinc_arg) < 1e-10:
             sinc_val = 1.0
         else:
-            sinc_val = np.sin(sinc_arg) / sinc_arg  # NO π!
-        
+            sinc_val = np.sin(sinc_arg) / sinc_arg
         cos_window = 1.0 + np.cos(np.pi * (n_val + 0.5) / (N + 0.5))
-        h_causal[i] = sinc_val * cos_window
-    
-    # Normalize
-    h_causal /= np.sum(h_causal)
-    return h_causal
+        h[i] = sinc_val * cos_window
+    h /= np.sum(h)
+    return h
 
-def debug_coefficients():
-    """Just print what coefficients should be vs what you're getting"""
-    expected = calculate_correct_filter()
-    print("Expected coefficients (first 16):")
-    for i in range(16):
-        print(f"  h[{i:2d}] = {expected[i]:.6f}")
+def test_impulse_response():
+    """Test impulse response - should match filter coefficients"""
+    print("\n" + "="*70)
+    print("=== TEST 1: IMPULSE RESPONSE (Filter Coefficients) ===")
+    print("="*70)
     
-    # Your current coefficients (from impulse response)
+    h_expected = calculate_correct_filter()
+    print(f"\n[EXPECTED] Filter coefficients h[n]:")
+    print(f"  Length: {len(h_expected)}")
+    print(f"  Sum: {np.sum(h_expected):.10f}")
+    print(f"  First 5:  {h_expected[:5]}")
+    print(f"  Last 5:   {h_expected[-5:]}")
+    
+    # Send impulse
     impulse = np.zeros(50, dtype=np.float32)
     impulse[0] = 1.0
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)
-    data = struct.pack(f'{len(impulse)}f', *impulse)
-    sock.sendto(data, (SERVER_IP, PORT))
-    response, _ = sock.recvfrom(4096)
-    received = struct.unpack(f'{len(impulse)}f', response)
-    actual = np.array(received[:32])
-    
-    print("\nActual coefficients (first 16):")
-    for i in range(16):
-        print(f"  h[{i:2d}] = {actual[i]:.6f}")
-    sock.close()
-
-
-def test_basic_functionality():
-    """Simplified test - just check if the basics work"""
-    print("=== FIR Filter Basic Test ===")
-    
-    # Test 1: Simple sine wave
-    duration = 0.01  # 10ms
-    t = np.arange(0, duration, 1/FS)
-    signal = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
     
     try:
-        # Send entire signal
-        data = struct.pack(f'{len(signal)}f', *signal)
+        start = time.perf_counter()
+        data = struct.pack(f'{len(impulse)}f', *impulse)
         sock.sendto(data, (SERVER_IP, PORT))
+        response, _ = sock.recvfrom(4096)
+        elapsed_ms = (time.perf_counter() - start) * 1000
         
-        # Receive response
-        response, addr = sock.recvfrom(4096)
-        received = struct.unpack(f'{len(signal)}f', response)
+        received = np.array(struct.unpack(f'{len(impulse)}f', response))
+        h_actual = received[:32]
         
-        print(f"Sent {len(signal)} samples, received {len(received)} samples")
+        print(f"\n[ACTUAL] From C++ server (impulse response):")
+        print(f"  Length: {len(h_actual)}")
+        print(f"  Sum: {np.sum(h_actual):.10f}")
+        print(f"  First 5:  {h_actual[:5]}")
+        print(f"  Last 5:   {h_actual[-5:]}")
         
-        # Basic checks
-        if len(received) != len(signal):
-            print(f"❌ FAIL: Length mismatch! Expected {len(signal)}, got {len(received)}")
-            return False
+        # Compare
+        diff = np.abs(h_actual - h_expected)
+        max_err = np.max(diff)
+        rmse = np.sqrt(np.mean(diff**2))
         
-        # Check if output is reasonable
-        input_rms = np.sqrt(np.mean(signal**2))
-        output_rms = np.sqrt(np.mean(np.array(received)**2))
-        attenuation = 20 * np.log10(output_rms / input_rms)
+        print(f"\n[COMPARISON]:")
+        print(f"  Max error: {max_err:.6e}")
+        print(f"  RMSE: {rmse:.6e}")
+        print(f"  Match (tolerance 1e-6)? {np.allclose(h_actual, h_expected, atol=1e-6)}")
+        print(f"  Time: {elapsed_ms:.2f} ms")
         
-        print(f"Input RMS: {input_rms:.6f}")
-        print(f"Output RMS: {output_rms:.6f}") 
-        print(f"Attenuation: {attenuation:.2f} dB")
-        
-        if abs(attenuation) < 3:  # Should pass through
-            print("✅ PASS: Signal preserved in passband")
+        if np.allclose(h_actual, h_expected, atol=1e-6):
+            print(f"\nPASS: Impulse response matches filter coefficients")
+            return True
         else:
-            print("❌ FAIL: Unexpected attenuation")
+            print(f"\nFAIL: Impulse response does not match")
+            return False
             
-        return True
-        
     except Exception as e:
-        print(f"❌ FAIL: {e}")
+        print(f"ERROR: {e}")
         return False
     finally:
         sock.close()
 
-def test_impulse_response():
-    """Check if filter coefficients match expected"""
-    print("\n=== Impulse Response Test ===")
+def test_direct_convolution():
+    """Test convolution y[n] = x[n] * h[n]"""
+    print("\n" + "="*70)
+    print("=== TEST 2: DIRECT CONVOLUTION OUTPUT ===")
+    print("="*70)
     
-    impulse = np.zeros(50, dtype=np.float32)
-    impulse[0] = 1.0
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        data = struct.pack(f'{len(impulse)}f', *impulse)
-        sock.sendto(data, (SERVER_IP, PORT))
-        response, addr = sock.recvfrom(4096)
-        received = struct.unpack(f'{len(impulse)}f', response)
-        
-        # Get actual filter coefficients from impulse response
-        actual_coeffs = np.array(received[:32])  # First 32 samples
-        
-        # Calculate what coefficients SHOULD be
-        expected_coeffs = calculate_correct_filter()
-        
-        print("First 10 expected coefficients:", expected_coeffs[:10])
-        print("First 10 actual coefficients:  ", actual_coeffs[:10])
-        
-        # Check correlation
-        correlation = np.corrcoef(expected_coeffs, actual_coeffs)[0,1]
-        max_error = np.max(np.abs(expected_coeffs - actual_coeffs))
-        
-        print(f"Correlation: {correlation:.6f}")
-        print(f"Max error: {max_error:.6f}")
-        
-        if correlation > 0.99:
-            print("✅ PASS: Filter coefficients match expected")
-        else:
-            print("❌ FAIL: Filter coefficients don't match")
-            print("This suggests the sinc function implementation is wrong!")
-            
-    except Exception as e:
-        print(f"❌ FAIL: {e}")
-    finally:
-        sock.close()
-
-def test_packet_continuity():
-    """Check if filter state is maintained across packets"""
-    print("\n=== Packet Continuity Test ===")
-    
-    # Generate longer signal
-    duration = 0.02
+    FC_TEST = 49099
+    duration = 0.005
     t = np.arange(0, duration, 1/FS)
-    signal = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
+    x = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
     
+    print(f"\n[INPUT SIGNAL]:")
+    print(f"  Frequency: {FC_TEST} Hz")
+    print(f"  Duration: {duration*1000:.2f} ms")
+    print(f"  Length: {len(x)} samples")
+    
+    h = calculate_correct_filter()
+
+    # Pad input with zeros at the beginning (filter history starts at zero)
+    x_padded = np.concatenate([np.zeros(len(h)-1, dtype=np.float32), x])
+    y_expected_full = np.convolve(x_padded, h, mode='valid').astype(np.float32)
+    
+    print(f"\n[EXPECTED OUTPUT (causal convolution)]:")
+    print(f"  Length: {len(y_expected_full)}")
+    print(f"  First 5: {y_expected_full[:5]}")
+    print(f"  First 5 after transient: {y_expected_full[32:37]}")
+    
+    # Get actual from C++
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)
     
     try:
-        # Send in two chunks
-        chunk1 = signal[:100]
-        chunk2 = signal[100:200]
+        start = time.perf_counter()
+        data = struct.pack(f'{len(x)}f', *x)
+        sock.sendto(data, (SERVER_IP, PORT))
+        response, _ = sock.recvfrom(4096)
+        elapsed_ms = (time.perf_counter() - start) * 1000
         
-        # Send first chunk
-        data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(chunk1)}f', response1)
+        y_actual = np.array(struct.unpack(f'{len(x)}f', response))
         
-        # Send second chunk  
-        data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(chunk2)}f', response2)
+        print(f"\n[ACTUAL OUTPUT:]")
+        print(f"  Length: {len(y_actual)}")
+        print(f"  First 5: {y_actual[:5]}")
+        print(f"  First 5 after transient: {y_actual[32:37]}")
+        print(f"  Time: {elapsed_ms:.2f} ms")
         
-        # Check if output is continuous AT THE BOUNDARY (not sample-to-sample)
-        boundary_jump = abs(out2[0] - out1[-1])
+        # Full comparison
+        min_len = min(len(y_actual), len(y_expected_full))
+        y_actual_cmp = y_actual[:min_len]
+        y_expected_cmp = y_expected_full[:min_len]
         
-        print(f"Boundary jump between packets: {boundary_jump:.6f}")
+        diff = np.abs(y_actual_cmp - y_expected_cmp)
+        max_err = np.max(diff)
+        rmse = np.sqrt(np.mean(diff**2))
         
-        # Also check a few samples after boundary to ensure continuity
-        post_boundary_consistency = np.mean(np.abs(np.diff(out2[:10])))
-        print(f"Post-boundary sample consistency: {post_boundary_consistency:.6f}")
+        print(f"\n[FULL COMPARISON]:")
+        print(f"  Length compared: {min_len}")
+        print(f"  Max error: {max_err:.6e}")
+        print(f"  RMSE: {rmse:.6e}")
+        print(f"  Match (tolerance 1e-4)? {np.allclose(y_actual_cmp, y_expected_cmp, atol=1e-4)}")
         
-        # Reasonable criteria: boundary jump should be small, and filter should stabilize
-        if boundary_jump < 0.05 and post_boundary_consistency < 0.1:
-            print("✅ PASS: Filter state maintained across packets")
+        # Also compare steady-state only
+        skip_samples = len(h)
+        y_actual_steady = y_actual[skip_samples:]
+        y_expected_steady = y_expected_full[skip_samples:]
+        min_len_steady = min(len(y_actual_steady), len(y_expected_steady))
+        
+        if min_len_steady > 0:
+            diff_steady = np.abs(y_actual_steady[:min_len_steady] - y_expected_steady[:min_len_steady])
+            max_err_steady = np.max(diff_steady)
+            rmse_steady = np.sqrt(np.mean(diff_steady**2))
+            
+            print(f"\n[STEADY-STATE COMPARISON (skipping first {skip_samples})]:")
+            print(f"  Length compared: {min_len_steady}")
+            print(f"  Max error: {max_err_steady:.6e}")
+            print(f"  RMSE: {rmse_steady:.6e}")
+        
+        if np.allclose(y_actual_cmp, y_expected_cmp, atol=1e-4):
+            print(f"\n✅ PASS: Convolution output matches expected")
+            return True
         else:
-            print("❌ FAIL: Filter state discontinuity detected")
+            print(f"\n❌ FAIL: Convolution output does not match")
+            print(f"\n[DEBUG] First 10 samples side-by-side:")
+            for i in range(min(10, min_len)):
+                print(f"  [{i}] Expected: {y_expected_cmp[i]:12.8f}, Actual: {y_actual_cmp[i]:12.8f}, Diff: {diff[i]:12.8f}")
+            return False
             
     except Exception as e:
-        print(f"❌ FAIL: {e}")
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
     finally:
         sock.close()
 
-def quick_frequency_test():
-    """Quick check of frequency response"""
-    print("\n=== Frequency Response Test ===")
+
+def test_passband_response():
+    """Test frequency response in passband"""
+    print("\n" + "="*70)
+    print("=== TEST 3: PASSBAND FREQUENCY RESPONSE ===")
+    print("="*70)
     
-    for fc in [5e3, 15e3, 25e3]:
+    freqs = [500, 1000, 5000]
+    results = []
+    
+    for fc in freqs:
         duration = 0.01
         t = np.arange(0, duration, 1/FS)
-        signal = np.sin(2 * np.pi * fc * t).astype(np.float32)
+        x = np.sin(2 * np.pi * fc * t).astype(np.float32)
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(2.0)
         
         try:
-            data = struct.pack(f'{len(signal)}f', *signal)
+            start = time.perf_counter()
+            data = struct.pack(f'{len(x)}f', *x)
             sock.sendto(data, (SERVER_IP, PORT))
             response, _ = sock.recvfrom(4096)
-            received = struct.unpack(f'{len(signal)}f', response)
+            elapsed_ms = (time.perf_counter() - start) * 1000
             
-            input_rms = np.sqrt(np.mean(signal**2))
-            output_rms = np.sqrt(np.mean(np.array(received)**2))
-            attenuation = 20 * np.log10(output_rms / input_rms)
+            y = np.array(struct.unpack(f'{len(x)}f', response))
             
-            status = "PASS" if (fc <= 10e3 and attenuation > -3) or (fc > 10e3 and attenuation < -10) else "FAIL"
-            print(f"{fc/1000:5.0f} kHz: {attenuation:6.1f} dB [{status}]")
+            input_rms = np.sqrt(np.mean(x**2))
+            output_rms = np.sqrt(np.mean(y**2))
+            attenuation_db = 20 * np.log10(output_rms / input_rms)
+            
+            print(f"\n  {fc:5d} Hz: {attenuation_db:6.2f} dB, time: {elapsed_ms:.2f} ms")
+            results.append((fc, attenuation_db))
             
         except Exception as e:
-            print(f"{fc/1000:5.0f} kHz: ERROR - {e}")
+            print(f"  {fc:5d} Hz: ERROR - {e}")
         finally:
             sock.close()
+    
+    # Check if passband (should be < 3 dB attenuation)
+    passband_ok = all(abs(att) < 3 for _, att in results)
+    if passband_ok:
+        print(f"\n✅ PASS: Passband response OK (all < 3dB)")
+        return True
+    else:
+        print(f"\n❌ FAIL: Passband response not OK")
+        return False
 
-def analyze_filter_response():
-    """Check what the actual filter frequency response is"""
-    print("\n=== Filter Frequency Analysis ===")
+def test_stopband_response():
+    """Test frequency response in stopband"""
+    print("\n" + "="*70)
+    print("=== TEST 4: STOPBAND FREQUENCY RESPONSE ===")
+    print("="*70)
     
-    # Get filter coefficients from impulse response
-    impulse = np.zeros(100, dtype=np.float32)
-    impulse[0] = 1.0
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    data = struct.pack(f'{len(impulse)}f', *impulse)
-    sock.sendto(data, (SERVER_IP, PORT))
-    response, _ = sock.recvfrom(4096)
-    received = struct.unpack(f'{len(impulse)}f', response)
-    h = np.array(received[:32])
-    sock.close()
+    freqs = [15000, 25000, 40000]
+    results = []
     
-    # Compute frequency response
-    H = np.fft.fft(h, 1024)
-    freq = np.fft.fftfreq(1024, 1/FS)
-    
-    # Find -3dB point
-    magnitude = 20 * np.log10(np.abs(H) + 1e-10)
-    max_mag = np.max(magnitude)
-    half_power_freq = None
-    
-    for i in range(len(freq)//2):
-        if freq[i] > 0 and magnitude[i] < max_mag - 3:
-            half_power_freq = freq[i]
-            break
-    
-    print(f"Filter peak response: {max_mag:.1f} dB")
-    print(f"-3dB cutoff frequency: {half_power_freq/1000:.1f} kHz")
-    print(f"Expected cutoff: {B/1000:.1f} kHz")
-    
-    # Plot a few key frequencies
-    print("\nKey frequency points:")
-    for f in [1e3, 3e3, 5e3, 7e3, 10e3]:
-        idx = np.argmin(np.abs(freq - f))
-        print(f"  {f/1000:4.0f} kHz: {magnitude[idx]:6.1f} dB")
-
-def debug_continuity_issue():
-    """Debug exactly where the continuity problem occurs"""
-    print("\n=== Debugging Continuity Issue ===")
-    
-    # Create a simple rising ramp signal
-    signal = np.arange(50, dtype=np.float32) * 0.01  # 0.00, 0.01, 0.02, ...
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send first 25 samples
-        chunk1 = signal[:25]
-        data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(chunk1)}f', response1)
+    for fc in freqs:
+        duration = 0.01
+        t = np.arange(0, duration, 1/FS)
+        x = np.sin(2 * np.pi * fc * t).astype(np.float32)
         
-        print("First chunk input (last 5):", chunk1[-5:])
-        print("First chunk output (last 5):", out1[-5:])
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(2.0)
         
-        # Send second 25 samples  
-        chunk2 = signal[25:]
-        data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(chunk2)}f', response2)
-        
-        print("Second chunk input (first 5):", chunk2[:5])
-        print("Second chunk output (first 5):", out2[:5])
-        
-        # Check the boundary
-        boundary_jump = abs(out2[0] - out1[-1])
-        print(f"Boundary jump: {boundary_jump:.6f}")
-        
-        # What should happen at the boundary?
-        # The filter should maintain state, so output should be continuous
-        # If there's a large jump, the delay line is being reset
-        
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def debug_large_jumps():
-    """Find exactly where the large jumps are happening"""
-    print("\n=== Debugging Large Jumps ===")
-    
-    # Generate test signal
-    duration = 0.02
-    t = np.arange(0, duration, 1/FS)
-    signal = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send in small chunks to find the problem
-        chunk_size = 50
-        all_output = []
-        
-        for i in range(0, len(signal), chunk_size):
-            chunk = signal[i:i+chunk_size]
-            data = struct.pack(f'{len(chunk)}f', *chunk)
+        try:
+            start = time.perf_counter()
+            data = struct.pack(f'{len(x)}f', *x)
             sock.sendto(data, (SERVER_IP, PORT))
             response, _ = sock.recvfrom(4096)
-            received = struct.unpack(f'{len(chunk)}f', response)
-            all_output.extend(received)
+            elapsed_ms = (time.perf_counter() - start) * 1000
             
-            if i > 0:  # Check boundary after first chunk
-                prev_chunk_end = all_output[i-1] if i > 0 else 0
-                current_chunk_start = received[0]
-                jump = abs(current_chunk_start - prev_chunk_end)
-                
-                if jump > 0.1:
-                    print(f"LARGE JUMP at sample {i}: {jump:.6f}")
-                    print(f"  Previous output end: {all_output[i-5:i]}")
-                    print(f"  Current output start: {received[:5]}")
-        
-        # Check all sample-to-sample differences
-        all_output_array = np.array(all_output)
-        diffs = np.diff(all_output_array)
-        large_jump_indices = np.where(np.abs(diffs) > 0.1)[0]
-        
-        if len(large_jump_indices) > 0:
-            print(f"\nFound {len(large_jump_indices)} large jumps:")
-            for idx in large_jump_indices[:10]:  # Show first 10
-                print(f"  Sample {idx}->{idx+1}: jump = {diffs[idx]:.6f}")
-        else:
-            print("No large jumps found in individual samples")
+            y = np.array(struct.unpack(f'{len(x)}f', response))
             
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
+            input_rms = np.sqrt(np.mean(x**2))
+            output_rms = np.sqrt(np.mean(y**2))
+            attenuation_db = 20 * np.log10(output_rms / input_rms)
+            
+            print(f"\n  {fc:5d} Hz: {attenuation_db:6.2f} dB, time: {elapsed_ms:.2f} ms")
+            results.append((fc, attenuation_db))
+            
+        except Exception as e:
+            print(f"  {fc:5d} Hz: ERROR - {e}")
+        finally:
+            sock.close()
+    
+    # Check if stopband (should be > 10 dB attenuation)
+    stopband_ok = all(att < -10 for _, att in results)
+    if stopband_ok:
+        print(f"\n✅ PASS: Stopband response OK (all > 10dB attenuation)")
+        return True
+    else:
+        print(f"\n❌ FAIL: Stopband response not OK")
+        return False
 
-def test_initial_state():
-    """Test if the filter starts with proper initial state"""
-    print("\n=== Testing Initial Filter State ===")
+def test_packet_continuity():
+    """Test if filter state is maintained across packets"""
+    print("\n" + "="*70)
+    print("=== TEST 5: PACKET CONTINUITY ===")
+    print("="*70)
     
-    # Test 1: Send zeros first to establish baseline
-    zeros = np.zeros(100, dtype=np.float32)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        data = struct.pack(f'{len(zeros)}f', *zeros)
-        sock.sendto(data, (SERVER_IP, PORT))
-        response, _ = sock.recvfrom(4096)
-        zero_output = struct.unpack(f'{len(zeros)}f', response)
-        
-        # Check if filter output settles to zero
-        last_10 = zero_output[-10:]
-        max_deviation = np.max(np.abs(last_10))
-        print(f"Max deviation from zero after 100 zeros: {max_deviation:.6f}")
-        
-        if max_deviation > 0.01:
-            print("❌ Filter doesn't settle to zero properly")
-        else:
-            print("✅ Filter settles to zero properly")
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def analyze_sine_wave_boundary():
-    """Analyze why the sine wave has large boundary jumps"""
-    print("\n=== Analyzing Sine Wave Boundary Issue ===")
-    
-    # Generate the exact same signal as in test_packet_continuity()
+    FC_TEST = 1000
     duration = 0.02
     t = np.arange(0, duration, 1/FS)
     signal = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
-    
-    print(f"Signal length: {len(signal)} samples")
-    print(f"First chunk (samples 0-99):")
-    print(f"  Input range: [{signal[0]:.6f} ... {signal[99]:.6f}]")
-    print(f"  Input at boundary: {signal[99]:.6f} -> {signal[100]:.6f}")
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send first chunk
-        chunk1 = signal[:100]
-        data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(chunk1)}f', response1)
-        
-        # Send second chunk  
-        chunk2 = signal[100:200]
-        data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(chunk2)}f', response2)
-        
-        print(f"Output at boundary:")
-        print(f"  Chunk1 end:   {out1[-5:]}")
-        print(f"  Chunk2 start: {out2[:5]}")
-        
-        # Calculate what the output SHOULD be if we sent the entire signal
-        full_data = struct.pack(f'{len(signal)}f', *signal)
-        sock.sendto(full_data, (SERVER_IP, PORT))
-        full_response, _ = sock.recvfrom(8192)
-        full_output = struct.unpack(f'{len(signal)}f', full_response)
-        
-        print(f"Full output at boundary:")
-        print(f"  Sample 99: {full_output[99]:.6f}")
-        print(f"  Sample 100: {full_output[100]:.6f}")
-        print(f"  Actual boundary jump in full signal: {abs(full_output[100] - full_output[99]):.6f}")
-        
-        # Compare chunked vs full
-        print(f"Comparison:")
-        print(f"  Chunked boundary jump: {abs(out2[0] - out1[-1]):.6f}")
-        print(f"  Full signal jump: {abs(full_output[100] - full_output[99]):.6f}")
-        print(f"  Expected chunk2[0]: {full_output[100]:.6f}")
-        print(f"  Actual chunk2[0]:   {out2[0]:.6f}")
-        
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def check_client_management():
-    """Check if the same client filter is being used"""
-    print("\n=== Checking Client Management ===")
-    
-    # Send two packets from the "same client" (same IP/port)
-    signal1 = np.sin(2 * np.pi * FC_TEST * np.arange(0, 0.01, 1/FS)).astype(np.float32)
-    signal2 = np.sin(2 * np.pi * FC_TEST * np.arange(0.01, 0.02, 1/FS)).astype(np.float32)
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # First packet
-        data1 = struct.pack(f'{len(signal1)}f', *signal1)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, addr1 = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(signal1)}f', response1)
-        
-        print(f"First packet from: {addr1}")
-        
-        # Second packet (should be same client)
-        data2 = struct.pack(f'{len(signal2)}f', *signal2)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, addr2 = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(signal2)}f', response2)
-        
-        print(f"Second packet from: {addr2}")
-        
-        if addr1 == addr2:
-            print("✅ Same client address - filter state should be maintained")
-        else:
-            print("❌ DIFFERENT client addresses - this explains the discontinuity!")
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def analyze_group_delay_effect():
-    """Demonstrate that the issue is group delay, not filter state"""
-    print("\n=== Analyzing Group Delay Effect ===")
-    
-    # Create a signal that crosses zero at the boundary
-    duration = 0.02
-    t = np.arange(0, duration, 1/FS)
-    signal = np.sin(2 * np.pi * FC_TEST * t).astype(np.float32)
-    
-    # Find where the sine wave crosses zero
-    zero_crossings = np.where(np.diff(np.signbit(signal)))[0]
-    print(f"Zero crossings in signal: {zero_crossings[:10]}")
-    
-    # Check if our boundary (sample 99->100) is near a zero crossing
-    boundary_idx = 99
-    nearest_zero = zero_crossings[np.argmin(np.abs(zero_crossings - boundary_idx))]
-    print(f"Boundary at sample {boundary_idx}, nearest zero crossing at sample {nearest_zero}")
-    print(f"Distance to zero crossing: {abs(boundary_idx - nearest_zero)} samples")
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send entire signal to see the true output
-        full_data = struct.pack(f'{len(signal)}f', *signal)
-        sock.sendto(full_data, (SERVER_IP, PORT))
-        full_response, _ = sock.recvfrom(8192)
-        full_output = struct.unpack(f'{len(signal)}f', full_response)
-        
-        # The "expected" output at the boundary
-        expected_jump = abs(full_output[100] - full_output[99])
-        print(f"Expected boundary jump in continuous signal: {expected_jump:.6f}")
-        
-        # This should be similar to our measured 0.096757
-        
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-# Also, let's test with a signal that DOESN'T cross zero at the boundary
-def test_non_zero_boundary():
-    """Test with a signal that doesn't cross zero at packet boundary"""
-    print("\n=== Testing Non-Zero Boundary ===")
-    
-    # Shift the sine wave so it doesn't cross zero at sample 100
-    duration = 0.02
-    t = np.arange(0, duration, 1/FS)
-    signal = np.sin(2 * np.pi * FC_TEST * t + np.pi/4).astype(np.float32)  # Phase shift
-    
-    print(f"Input at boundary: {signal[99]:.6f} -> {signal[100]:.6f}")
     
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)
@@ -554,208 +295,85 @@ def test_non_zero_boundary():
         chunk1 = signal[:100]
         chunk2 = signal[100:200]
         
+        start = time.perf_counter()
         data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
         sock.sendto(data1, (SERVER_IP, PORT))
         response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(chunk1)}f', response1)
+        out1 = np.array(struct.unpack(f'{len(chunk1)}f', response1))
         
         data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
         sock.sendto(data2, (SERVER_IP, PORT))
         response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(chunk2)}f', response2)
+        out2 = np.array(struct.unpack(f'{len(chunk2)}f', response2))
+        elapsed_ms = (time.perf_counter() - start) * 1000
         
         boundary_jump = abs(out2[0] - out1[-1])
-        print(f"Boundary jump with phase-shifted sine: {boundary_jump:.6f}")
+        
+        print(f"\n[PACKET 1]:")
+        print(f"  Length: {len(chunk1)}")
+        print(f"  Output last 3: {out1[-3:]}")
+        
+        print(f"\n[PACKET 2]:")
+        print(f"  Length: {len(chunk2)}")
+        print(f"  Output first 3: {out2[:3]}")
+        
+        print(f"\n[BOUNDARY]:")
+        print(f"  Jump (out2[0] - out1[-1]): {boundary_jump:.6f}")
+        print(f"  Time: {elapsed_ms:.2f} ms")
         
         if boundary_jump < 0.05:
-            print("✅ PASS: Small jump with non-zero boundary")
+            print(f"\n✅ PASS: Continuity maintained (jump < 0.05)")
+            return True
         else:
-            print("❌ Still large - there might be another issue")
+            print(f"\n❌ FAIL: Discontinuity detected (jump >= 0.05)")
+            return False
             
     except Exception as e:
-        print(f"ERROR: {e}")
+        print(f"❌ ERROR: {e}")
+        return False
     finally:
         sock.close()
 
-def debug_filter_state_directly():
-    """Directly test if filter state is being maintained"""
-    print("\n=== Direct Filter State Test ===")
-    
-    # Test 1: Send identical packets and see if output changes
-    test_signal = np.ones(50, dtype=np.float32) * 0.5  # Constant signal
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send first packet
-        data1 = struct.pack(f'{len(test_signal)}f', *test_signal)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(test_signal)}f', response1)
-        
-        print(f"First packet output (last 5): {out1[-5:]}")
-        
-        # Send second IDENTICAL packet
-        data2 = struct.pack(f'{len(test_signal)}f', *test_signal)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(test_signal)}f', response2)
-        
-        print(f"Second packet output (first 5): {out2[:5]}")
-        
-        # For a constant input, the output should stabilize to the same value
-        # If filter state is maintained, the second packet should continue smoothly
-        
-        boundary_jump = abs(out2[0] - out1[-1])
-        print(f"Boundary jump with constant input: {boundary_jump:.6f}")
-        
-        if boundary_jump < 0.01:
-            print("✅ Filter state maintained with constant input")
-        else:
-            print("❌ Filter state NOT maintained - this is the bug!")
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def test_circular_buffer():
-    """Test if the circular buffer is working correctly"""
-    print("\n=== Circular Buffer Test ===")
-    
-    # Send a pattern that tests the circular buffer wrap-around
-    pattern = np.array([1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    repeated_pattern = np.tile(pattern, 20)  # Repeat 20 times
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        data = struct.pack(f'{len(repeated_pattern)}f', *repeated_pattern)
-        sock.sendto(data, (SERVER_IP, PORT))
-        response, _ = sock.recvfrom(4096)
-        output = struct.unpack(f'{len(repeated_pattern)}f', response)
-        
-        # The output should show the filter's impulse response repeating
-        # If circular buffer is broken, we'll see anomalies
-        
-        print("Output pattern (first 30 samples):")
-        for i in range(0, min(30, len(output)), 5):
-            print(f"  Samples {i:2d}-{i+4:2d}: {output[i:i+5]}")
-            
-        # Check for unexpected jumps
-        diffs = np.diff(output)
-        large_jumps = np.where(np.abs(diffs) > 0.1)[0]
-        if len(large_jumps) > 0:
-            print(f"Found {len(large_jumps)} unexpected jumps in pattern test")
-        else:
-            print("No unexpected jumps in pattern test")
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def final_verification():
-    """Final test to verify the core functionality"""
-    print("\n=== Final Verification ===")
-    
-    # The key question: Does the filter maintain state across UDP packets?
-    # Let's test with a very simple case
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2.0)
-    
-    try:
-        # Send [1, 0, 0, 0, ...] in two chunks
-        chunk1 = np.array([1.0] + [0.0] * 49, dtype=np.float32)  # 1 followed by 49 zeros
-        chunk2 = np.array([0.0] * 50, dtype=np.float32)  # 50 zeros
-        
-        # First chunk - should see impulse response
-        data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
-        sock.sendto(data1, (SERVER_IP, PORT))
-        response1, _ = sock.recvfrom(4096)
-        out1 = struct.unpack(f'{len(chunk1)}f', response1)
-        
-        print("First chunk (impulse response start):")
-        print(f"  Output: {out1[:10]}")
-        
-        # Second chunk - should see continuation of impulse response
-        data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
-        sock.sendto(data2, (SERVER_IP, PORT))
-        response2, _ = sock.recvfrom(4096)
-        out2 = struct.unpack(f'{len(chunk2)}f', response2)
-        
-        print("Second chunk (impulse response continuation):")
-        print(f"  Output: {out2[:10]}")
-        
-        # The first output of chunk2 should continue from the impulse response
-        expected_continuation = out1[-1]  # Should be close to zero for our filter
-        actual_continuation = out2[0]
-        
-        print(f"Expected continuation: {expected_continuation:.6f}")
-        print(f"Actual continuation: {actual_continuation:.6f}")
-        
-        if abs(actual_continuation - expected_continuation) < 0.01:
-            print("✅ IMPULSE RESPONSE CONTINUES - Filter state is maintained!")
-        else:
-            print("❌ IMPULSE RESPONSE BROKEN - Filter state is NOT maintained!")
-            
-    except Exception as e:
-        print(f"ERROR: {e}")
-    finally:
-        sock.close()
-
-def timed_test(test_func):
-    print(f"\nRunning {test_func.__name__}...")
-    start_time = time.perf_counter()
-    result = test_func()
-    end_time = time.perf_counter()
-    elapsed_ms = (end_time - start_time) * 1000
-    print(f"{test_func.__name__} completed in {elapsed_ms:.2f} ms")
-    return result
+def print_summary():
+    """Print resource usage summary"""
+    print("\n" + "="*70)
+    print("=== RESOURCE USAGE SUMMARY ===")
+    print("="*70)
+    print(f"\nFilter Length (Number of Taps): {2*N}")
+    print(f"Per Output Sample:")
+    print(f"  - Memory Loads: {2*N} (delay line + coefficients)")
+    print(f"  - Memory Stores: 1 (write to delay line)")
+    print(f"  - Multiply Operations: {2*N}")
+    print(f"  - Addition Operations: {2*N-1}")
+    print(f"  - Bitwise Operations: 1 (circular buffer wrap)")
+    print(f"\nAdditional Storage:")
+    print(f"  - Delay line: {2*N} floats × 4 bytes = {2*N*4} bytes")
+    print(f"  - Coefficients: {2*N} floats × 4 bytes = {2*N*4} bytes")
+    print(f"  - Total: {(2*N*4)*2} bytes")
 
 if __name__ == "__main__":
-    print("Make sure the C++ server is running on port 8080!")
+    print("="*70)
+    print("FIR FILTER COMPREHENSIVE TESTBENCH")
+    print("="*70)
+    print("\nMake sure the C++ server is running on port 8080!")
     print("Press Enter to start tests...")
     input()
     
-    timed_test(test_basic_functionality)
-    timed_test(test_impulse_response)
-    timed_test(test_packet_continuity)
-    timed_test(quick_frequency_test)
-
-    test_basic_functionality()
-    test_impulse_response()      # This will reveal the sinc function error
-    test_packet_continuity()
-    quick_frequency_test()
+    results = []
+    results.append(("Impulse Response", test_impulse_response()))
+    results.append(("Direct Convolution", test_direct_convolution()))
+    results.append(("Passband Response", test_passband_response()))
+    results.append(("Stopband Response", test_stopband_response()))
+    results.append(("Packet Continuity", test_packet_continuity()))
     
-    # Add this to your main
-    debug_coefficients()
-    # Add this call to main
-    analyze_filter_response()
-    debug_continuity_issue()
-    # Add this to your main() after the other tests
-    debug_large_jumps()
-    test_initial_state()
-    analyze_sine_wave_boundary()
-    check_client_management()
-    analyze_group_delay_effect()
-    test_non_zero_boundary()
-
-    debug_filter_state_directly()
-    test_circular_buffer() 
-    final_verification()
+    print_summary()
     
-    print("\n=== High Level FIR Filter Resource Usage Summary ===")
-    print(f"Filter Length (Number of Taps): {2*N}")
-    print(f"Per Output Sample Resources:")
-    print(f" - Memory Loads from Delay Line: {2*N}")
-    print(f" - Memory Loads of Coefficients: {2*N}")
-    print(f" - Multiply Operations: {2*N}")
-    print(f" - Additions (Accumulator): {2*N - 1}")
-    print(f" - Modulo/Bitwise Operations: 1 (write index wrap)")
-    print(f"Additional Storage:")
-    print(f" - Delay line buffer: {2*N} floats")
-    print(f" - Coefficients array: {2*N} floats")
+    print("\n" + "="*70)
+    print("TEST SUMMARY")
+    print("="*70)
+    for name, passed in results:
+        status = "✅ PASS" if passed else "❌ FAIL"
+        print(f"{name:30s} {status}")
+    
+    total_passed = sum(1 for _, p in results if p)
+    print(f"\nTotal: {total_passed}/{len(results)} tests passed")
