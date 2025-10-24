@@ -13,7 +13,6 @@ PORT = 8080
 SERVER_IP = "127.0.0.1"
 
 def calculate_correct_filter():
-    """Calculate what the filter coefficients SHOULD be"""
     h = np.zeros(2 * N, dtype=np.float32)
     for i in range(2 * N):
         n_val = i - N
@@ -24,14 +23,10 @@ def calculate_correct_filter():
             sinc_val = np.sin(sinc_arg) / sinc_arg
         cos_window = 1.0 + np.cos(np.pi * (n_val + 0.5) / (N + 0.5))
         h[i] = sinc_val * cos_window
-    #h /= np.sum(h)
     return h
 
 def test_impulse_response():
-    """Test impulse response - should match filter coefficients"""
-    print("\n" + "="*70)
-    print("=== TEST 1: IMPULSE RESPONSE (Filter Coefficients) ===")
-    print("="*70)
+    print("=== TEST 1: IMPULSE RESPONSE ===")
     
     h_expected = calculate_correct_filter()
     print(f"\n[EXPECTED] Filter coefficients h[n] (UNNORMALIZED):")
@@ -87,11 +82,8 @@ def test_impulse_response():
         sock.close()
 
 def test_direct_convolution():
-    """Test convolution y[n] = x[n] * h[n]"""
-    print("\n" + "="*70)
-    print("=== TEST 2: DIRECT CONVOLUTION OUTPUT ===")
-    print("="*70)
-    
+    print("=== TEST 2: CONVOLUTION OUTPUT ===")    
+
     FC_TEST = 1000
     duration = 0.005
     t = np.arange(0, duration, 1/FS)
@@ -183,11 +175,8 @@ def test_direct_convolution():
 
 
 def test_passband_response():
-    """Test frequency response in passband"""
-    print("\n" + "="*70)
     print("=== TEST 3: PASSBAND FREQUENCY RESPONSE ===")
-    print("="*70)
-    
+
     freqs = [500, 1000, 5000]
     results = []
     
@@ -231,10 +220,7 @@ def test_passband_response():
         return False
 
 def test_stopband_response():
-    """Test frequency response in stopband"""
-    print("\n" + "="*70)
     print("=== TEST 4: STOPBAND FREQUENCY RESPONSE ===")
-    print("="*70)
     
     freqs = [15000, 25000, 40000]
     results = []
@@ -283,9 +269,7 @@ def test_stopband_response():
         return False
 
 def test_packet_continuity():
-    print("\n" + "="*70)
     print("=== TEST 5: PACKET CONTINUITY ===")
-    print("="*70)
     
     FC_TEST = 1000
     duration = 0.02
@@ -347,32 +331,9 @@ def test_packet_continuity():
         sock.close()
 
 
-def print_summary():
-    """Print resource usage summary"""
-    print("\n" + "="*70)
-    print("=== RESOURCE USAGE SUMMARY ===")
-    print("="*70)
-    print(f"\nFilter Length (Number of Taps): {2*N}")
-    print(f"\n⚡ SYMMETRIC OPTIMIZATION ENABLED")
-    print(f"Filter exploits h[i] = h[{2*N-1}-i] symmetry")
-    print(f"\nPer Output Sample:")
-    print(f"  - Memory Loads: {2*N} delay line + {N} coefficients = {2*N + N}")
-    print(f"  - Memory Stores: 1 (write to delay line)")
-    print(f"  - Multiply Operations: {N} (50% reduction vs direct)")
-    print(f"  - Addition Operations: {N} pairwise + {N-1} accumulation = {2*N-1}")
-    print(f"  - Bitwise Operations: 1 (circular buffer wrap)")
-    print(f"\nAdditional Storage:")
-    print(f"  - Delay line: {2*N} floats × 4 bytes = {2*N*4} bytes")
-    print(f"  - Coefficients (stored): {N} floats × 4 bytes = {N*4} bytes")
-    print(f"  - Total: {2*N*4 + N*4} bytes")
-    print(f"\nNote: Filter coefficients are UNNORMALIZED")
-
 if __name__ == "__main__":
-    print("="*70)
-    print("FIR FILTER COMPREHENSIVE TESTBENCH")
-    print("="*70)
-    print("\nMake sure the C++ server is running on port 8080!")
-    print("Press Enter to start tests...")
+    print("\nC++ server should be on port 8080!")
+    print("Press Enter to start:")
     input()
     
     results = []
@@ -381,12 +342,8 @@ if __name__ == "__main__":
     results.append(("Passband Response", test_passband_response()))
     results.append(("Stopband Response", test_stopband_response()))
     results.append(("Packet Continuity", test_packet_continuity()))
-    
-    print_summary()
-    
-    print("\n" + "="*70)
-    print("TEST SUMMARY")
-    print("="*70)
+        
+    print("\nTEST SUMMARY")
     for name, passed in results:
         status = "PASS" if passed else "FAIL"
         print(f"{name:30s} {status}")
