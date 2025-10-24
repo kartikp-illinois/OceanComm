@@ -13,7 +13,6 @@ PORT = 8080
 SERVER_IP = "127.0.0.1"
 
 def calculate_correct_filter():
-    """Calculate what the filter coefficients SHOULD be"""
     h = np.zeros(2 * N, dtype=np.float32)
     for i in range(2 * N):
         n_val = i - N
@@ -28,10 +27,7 @@ def calculate_correct_filter():
     return h
 
 def test_impulse_response():
-    """Test impulse response - should match filter coefficients"""
-    print("\n" + "="*70)
-    print("=== TEST 1: IMPULSE RESPONSE (Filter Coefficients) ===")
-    print("="*70)
+    print("\n=== TEST 1: IMPULSE RESPONSE (Filter Coefficients) ===")
     
     h_expected = calculate_correct_filter()
     print(f"\n[EXPECTED] Filter coefficients h[n]:")
@@ -87,10 +83,7 @@ def test_impulse_response():
         sock.close()
 
 def test_direct_convolution():
-    """Test convolution y[n] = x[n] * h[n]"""
-    print("\n" + "="*70)
-    print("=== TEST 2: DIRECT CONVOLUTION OUTPUT ===")
-    print("="*70)
+    print("\n=== TEST 2: DIRECT CONVOLUTION OUTPUT ===")
     
     FC_TEST = 49099
     duration = 0.005
@@ -164,17 +157,17 @@ def test_direct_convolution():
             print(f"  RMSE: {rmse_steady:.6e}")
         
         if np.allclose(y_actual_cmp, y_expected_cmp, atol=1e-4):
-            print(f"\n✅ PASS: Convolution output matches expected")
+            print(f"\nPASS: Convolution output matches expected")
             return True
         else:
-            print(f"\n❌ FAIL: Convolution output does not match")
+            print(f"\nFAIL: Convolution output does not match")
             print(f"\n[DEBUG] First 10 samples side-by-side:")
             for i in range(min(10, min_len)):
                 print(f"  [{i}] Expected: {y_expected_cmp[i]:12.8f}, Actual: {y_actual_cmp[i]:12.8f}, Diff: {diff[i]:12.8f}")
             return False
             
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -183,11 +176,8 @@ def test_direct_convolution():
 
 
 def test_passband_response():
-    """Test frequency response in passband"""
-    print("\n" + "="*70)
-    print("=== TEST 3: PASSBAND FREQUENCY RESPONSE ===")
-    print("="*70)
-    
+    print("\n=== TEST 3: PASSBAND FREQUENCY RESPONSE ===")
+
     freqs = [500, 1000, 5000]
     results = []
     
@@ -223,18 +213,14 @@ def test_passband_response():
     # Check if passband (should be < 3 dB attenuation)
     passband_ok = all(abs(att) < 3 for _, att in results)
     if passband_ok:
-        print(f"\n✅ PASS: Passband response OK (all < 3dB)")
+        print(f"\nPASS: Passband response OK (all < 3dB)")
         return True
     else:
-        print(f"\n❌ FAIL: Passband response not OK")
+        print(f"\nFAIL: Passband response not OK")
         return False
 
 def test_stopband_response():
-    """Test frequency response in stopband"""
-    print("\n" + "="*70)
-    print("=== TEST 4: STOPBAND FREQUENCY RESPONSE ===")
-    print("="*70)
-    
+    print("\n=== TEST 4: STOPBAND FREQUENCY RESPONSE ===")    
     freqs = [15000, 25000, 40000]
     results = []
     
@@ -267,20 +253,16 @@ def test_stopband_response():
         finally:
             sock.close()
     
-    # Check if stopband (should be > 10 dB attenuation)
     stopband_ok = all(att < -10 for _, att in results)
     if stopband_ok:
-        print(f"\n✅ PASS: Stopband response OK (all > 10dB attenuation)")
+        print(f"\nPASS: Stopband response OK (all > 10dB attenuation)")
         return True
     else:
-        print(f"\n❌ FAIL: Stopband response not OK")
+        print(f"\nFAIL: Stopband response not OK")
         return False
 
 def test_packet_continuity():
-    """Test if filter state is maintained across packets"""
-    print("\n" + "="*70)
-    print("=== TEST 5: PACKET CONTINUITY ===")
-    print("="*70)
+    print("\n=== TEST 5: PACKET CONTINUITY ===")
     
     FC_TEST = 1000
     duration = 0.02
@@ -291,7 +273,6 @@ def test_packet_continuity():
     sock.settimeout(2.0)
     
     try:
-        # Send in two chunks
         chunk1 = signal[:100]
         chunk2 = signal[100:200]
         
@@ -322,41 +303,22 @@ def test_packet_continuity():
         print(f"  Time: {elapsed_ms:.2f} ms")
         
         if boundary_jump < 0.05:
-            print(f"\n✅ PASS: Continuity maintained (jump < 0.05)")
+            print(f"\nPASS: Continuity maintained (jump < 0.05)")
             return True
         else:
-            print(f"\n❌ FAIL: Discontinuity detected (jump >= 0.05)")
+            print(f"\nFAIL: Discontinuity detected (jump >= 0.05)")
             return False
             
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"ERROR: {e}")
         return False
     finally:
         sock.close()
 
-def print_summary():
-    """Print resource usage summary"""
-    print("\n" + "="*70)
-    print("=== RESOURCE USAGE SUMMARY ===")
-    print("="*70)
-    print(f"\nFilter Length (Number of Taps): {2*N}")
-    print(f"Per Output Sample:")
-    print(f"  - Memory Loads: {2*N} (delay line + coefficients)")
-    print(f"  - Memory Stores: 1 (write to delay line)")
-    print(f"  - Multiply Operations: {2*N}")
-    print(f"  - Addition Operations: {2*N-1}")
-    print(f"  - Bitwise Operations: 1 (circular buffer wrap)")
-    print(f"\nAdditional Storage:")
-    print(f"  - Delay line: {2*N} floats × 4 bytes = {2*N*4} bytes")
-    print(f"  - Coefficients: {2*N} floats × 4 bytes = {2*N*4} bytes")
-    print(f"  - Total: {(2*N*4)*2} bytes")
 
 if __name__ == "__main__":
-    print("="*70)
-    print("FIR FILTER COMPREHENSIVE TESTBENCH")
-    print("="*70)
-    print("\nMake sure the C++ server is running on port 8080!")
-    print("Press Enter to start tests...")
+    print("\nC++ server should be on port 8080!")
+    print("Press Enter to start tests:")
     input()
     
     results = []
@@ -365,14 +327,10 @@ if __name__ == "__main__":
     results.append(("Passband Response", test_passband_response()))
     results.append(("Stopband Response", test_stopband_response()))
     results.append(("Packet Continuity", test_packet_continuity()))
-    
-    print_summary()
-    
-    print("\n" + "="*70)
-    print("TEST SUMMARY")
-    print("="*70)
+        
+    print("\n\nTEST SUMMARY\n")
     for name, passed in results:
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = "PASS" if passed else "FAIL"
         print(f"{name:30s} {status}")
     
     total_passed = sum(1 for _, p in results if p)
