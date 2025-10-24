@@ -56,7 +56,7 @@ def test_impulse_response():
         received = np.array(struct.unpack(f'{len(impulse)}f', response))
         h_actual = received[:32]
         
-        print(f"\n[ACTUAL] From C++ server (impulse response):")
+        print(f"\n[ACTUAL] From server (impulse response):")
         print(f"  Length: {len(h_actual)}")
         print(f"  Sum: {np.sum(h_actual):.10f}")
         print(f"  First 5:  {h_actual[:5]}")
@@ -74,14 +74,14 @@ def test_impulse_response():
         print(f"  Time: {elapsed_ms:.2f} ms")
         
         if np.allclose(h_actual, h_expected, atol=1e-6):
-            print(f"\n✅ PASS: Impulse response matches filter coefficients")
+            print(f"\nPASS: Impulse response matches filter coefficients")
             return True
         else:
-            print(f"\n❌ FAIL: Impulse response does not match")
+            print(f"\nFAIL: Impulse response does not match")
             return False
             
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"\nERROR: {e}")
         return False
     finally:
         sock.close()
@@ -104,7 +104,7 @@ def test_direct_convolution():
     
     h = calculate_correct_filter()
     
-    # Pad input with zeros at the beginning (filter history starts at zero)
+    # Pad input with zeros, filter history starts at zero
     x_padded = np.concatenate([np.zeros(len(h)-1, dtype=np.float32), x])
     y_expected_full = np.convolve(x_padded, h, mode='valid').astype(np.float32)
     
@@ -113,7 +113,7 @@ def test_direct_convolution():
     print(f"  First 5: {y_expected_full[:5]}")
     print(f"  First 5 after transient: {y_expected_full[32:37]}")
     
-    # Get actual from C++
+    # Get actual
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)
     
@@ -164,11 +164,11 @@ def test_direct_convolution():
             print(f"  RMSE: {rmse_steady:.6e}")
         
         if np.allclose(y_actual_cmp, y_expected_cmp, atol=1e-4):
-            print(f"\n✅ PASS: Convolution output matches expected")
+            print(f"\nPASS: Convolution output matches expected")
             return True
         else:
-            print(f"\n❌ FAIL: Convolution output does not match")
-            print(f"\n[DEBUG] First 10 samples side-by-side:")
+            print(f"\nFAIL: Convolution output does not match")
+            print(f"\nFirst 10 samples:")
             for i in range(min(10, min_len)):
                 print(f"  [{i}] Expected: {y_expected_cmp[i]:12.8f}, Actual: {y_actual_cmp[i]:12.8f}, Diff: {diff[i]:12.8f}")
             return False
@@ -224,10 +224,10 @@ def test_passband_response():
     # We just check that low frequencies aren't heavily attenuated
     passband_ok = all(att > -6 for _, att in results)  # Relaxed threshold
     if passband_ok:
-        print(f"\n✅ PASS: Passband response OK (all > -6dB)")
+        print(f"\nPASS: Passband response OK (all > -6dB)")
         return True
     else:
-        print(f"\n❌ FAIL: Passband response not OK")
+        print(f"\nFAIL: Passband response not OK")
         return False
 
 def test_stopband_response():
@@ -274,17 +274,15 @@ def test_stopband_response():
             sock.close()
     
     # Check relative attenuation: stopband should be much lower than passband
-    # Without normalization, we check that stopband is at least 25dB below passband
-    stopband_ok = all(att < -5 for _, att in results)  # Adjusted threshold
+    stopband_ok = all(att < -5 for _, att in results) 
     if stopband_ok:
-        print(f"\n✅ PASS: Stopband response OK (all < -20dB)")
+        print(f"\nPASS: Stopband response OK (all < -20dB)")
         return True
     else:
-        print(f"\n❌ FAIL: Stopband response not OK")
+        print(f"\nFAIL: Stopband response not OK")
         return False
 
 def test_packet_continuity():
-    """Test if filter state is maintained across packets"""
     print("\n" + "="*70)
     print("=== TEST 5: PACKET CONTINUITY ===")
     print("="*70)
@@ -297,7 +295,6 @@ def test_packet_continuity():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2.0)
     
-    # Connect to lock in the source port
     sock.connect((SERVER_IP, PORT))
     
     try:
@@ -306,19 +303,15 @@ def test_packet_continuity():
         
         start = time.perf_counter()
         
-        # Use send() instead of sendto()
         data1 = struct.pack(f'{len(chunk1)}f', *chunk1)
         sock.send(data1)
         
-        # Use recv() instead of recvfrom()
         response1 = sock.recv(4096)
         out1 = np.array(struct.unpack(f'{len(chunk1)}f', response1))
         
-        # Send packet 2 on same connection
         data2 = struct.pack(f'{len(chunk2)}f', *chunk2)
         sock.send(data2)
         
-        # Receive response 2
         response2 = sock.recv(4096)
         out2 = np.array(struct.unpack(f'{len(chunk2)}f', response2))
         
@@ -326,28 +319,27 @@ def test_packet_continuity():
         
         boundary_jump = abs(out2[0] - out1[-1])
         
-        print(f"\n[PACKET 1]:")
-        print(f"  Length: {len(chunk1)}")
-        print(f"  Output last 3: {out1[-3:]}")
+        # print(f"\n[PACKET 1]:")
+        # print(f"  Length: {len(chunk1)}")
+        # print(f"  Output last 3: {out1[-3:]}")
         
-        print(f"\n[PACKET 2]:")
-        print(f"  Length: {len(chunk2)}")
-        print(f"  Output first 3: {out2[:3]}")
+        # print(f"\n[PACKET 2]:")
+        # print(f"  Length: {len(chunk2)}")
+        # print(f"  Output first 3: {out2[:3]}")
         
-        print(f"\n[BOUNDARY]:")
-        print(f"  Jump (out2[0] - out1[-1]): {boundary_jump:.6f}")
-        print(f"  Time: {elapsed_ms:.2f} ms")
+        # print(f"\n[BOUNDARY]:")
+        # print(f"  Jump (out2[0] - out1[-1]): {boundary_jump:.6f}")
+        # print(f"  Time: {elapsed_ms:.2f} ms")
         
-        # Adjusted threshold for unnormalized filter
-        if boundary_jump < 1.0:  # Larger threshold due to higher gain
-            print(f"\n✅ PASS: Continuity maintained (jump < 1.0)")
+        if boundary_jump < 1.0:  #Large threshold due to higher gain
+            print(f"\nPASS: Continuity maintained (jump < 1.0)")
             return True
         else:
-            print(f"\n❌ FAIL: Discontinuity detected (jump >= 1.0)")
+            print(f"\nFAIL: Discontinuity detected (jump >= 1.0)")
             return False
             
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -396,7 +388,7 @@ if __name__ == "__main__":
     print("TEST SUMMARY")
     print("="*70)
     for name, passed in results:
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = "PASS" if passed else "FAIL"
         print(f"{name:30s} {status}")
     
     total_passed = sum(1 for _, p in results if p)
