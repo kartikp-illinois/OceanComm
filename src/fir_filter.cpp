@@ -96,8 +96,8 @@ float FIRFilter::process(float sample) {
     //     std::cout << "[C++]   Using symmetric optimization\n";
     // }
     
-    // Exploit symmetry: h[i] = h[FILTER_LENGTH - 1 - i]
-    // For even-length symmetric filter:
+    // symmetry: h[i] = h[FILTER_LENGTH - 1 - i]
+    // For even-length filter:
     // y[n] = h[0]*(x[n] + x[n-31]) + h[1]*(x[n-1] + x[n-30]) + ... + h[15]*(x[n-15] + x[n-16])
     
     int half_length = FILTER_LENGTH / 2;
