@@ -49,7 +49,7 @@ pip3 install numpy
 ```
 
 
-## 🏗️ Building and Compiling
+## Building and Compiling
 
 ### Quick Build (Automated)
 
@@ -84,7 +84,7 @@ make
 
 ---
 
-## ▶️ Running the Application
+## Running the Application
 
 ### Start the UDP Server
 
@@ -102,7 +102,7 @@ The server listens on **127.0.0.1:8080** and processes incoming UDP packets.
 
 ---
 
-## 📡 Server Protocol
+## Server Protocol
 
 ### Input Format
 
