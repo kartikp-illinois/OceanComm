@@ -256,7 +256,7 @@ def test_stopband_response():
             
         except Exception as e:
             print(f"  {fc:5d} Hz: ERROR - {e}")
-        finally:
+        finally: 
             sock.close()
     
     # Check relative attenuation: stopband should be much lower than passband
