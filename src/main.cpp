@@ -213,7 +213,7 @@ int main() {
         // Returns: number of bytes received, or -1 on error
         ssize_t bytes_received = recvfrom(
             sockfd,                                      // Our UDP socket
-            reinterpret_cast<char*>(input.data()),       // Where to put data (cast float* to char*)
+            reinterpret_cast<char*>(input.data()),       // Where to put data (cast float* to char*) //why cast? because recvfrom expects a char* buffer
             BUFFER_SIZE,                                 // Max bytes (4096)
             0,                                           // No special flags
             reinterpret_cast<sockaddr*>(&client_addr),  // Gets filled with sender address
@@ -293,6 +293,8 @@ int main() {
             //   3. Increment write_index (with wraparound)
             //   4. Return filtered value
             output[i] = filter.process(input[i]);
+            //when write_index is initally empty, the first 32 samples will be processed with zeros in the delay line
+            //the delay line's purpose is to store the most recent 32 samples for the FIR filter
         }
         
         // After loop:
@@ -307,7 +309,10 @@ int main() {
         //   sockfd: which socket to send from
         //   output.data(): data to send (cast float* to char*)
         //   bytes_received: send same number of bytes we received
-        //   0: flags (none)
+        //   0: flags (none) --> some possible flags are
+        //     - MSG_CONFIRM: only for UDP, allows to send to a broadcast address
+        //       (a broadcast address is an address that receives packets sent to all hosts on a network)
+        //     - MSG_DONTROUTE: don't use routing, send directly to interface
         //   &client_addr: destination address (SAME as sender!)
         //   client_len: size of destination address structure
         // 
@@ -326,12 +331,17 @@ int main() {
         //   - sockfd: the socket file descriptor to send data from
         //   - output.data(): a pointer to the data to send (cast to char*)
         //   - bytes_received: the number of bytes to send
-        //   - 0: flags (none)
+        //   - 0: flags (none) 
+            // Some possible flags are
+            //   - MSG_CONFIRM: only for UDP, allows to send to a broadcast address
+            //     (a broadcast address is an address that receives packets sent to all hosts on a network)
+            //   - MSG_DONTROUTE: don't use routing, send directly to interface
+                    // routing is what happens when a packet is sent from one network to another network
         //   - &client_addr: the destination address (same as sender)
         //   - client_len: the size of the destination address structure
         //how is data compressed before sending?
         // In this implementation, the data is not compressed before sending.
-        // The server simply processes the received samples using the FIR filter
+        // The server sim`ply processes the received samples using the FIR filter
         // and sends the filtered samples back to the client in the same format.
         //what is the specific way the data is sent? the server does something to receive to grab the metadata or smth?
         // The data is sent back to the client using the sendto() function,

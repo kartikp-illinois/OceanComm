@@ -4,7 +4,26 @@
 #include <iostream>
 #include <iomanip>
 
-FIRFilter::FIRFilter() : delay_line(FILTER_LENGTH, 0.0f), write_index(0), sample_count(0) {
+
+//formula:  h[n] = sinc( (B/FS) * (n - (N - 0.5)) ) * (1 + cos( π * (n - (N - 0.5)) / (N + 0.5) ) )
+//as a fourier transform, this is equivalent to a lowpass filter with cutoff frequency B. 
+//the cosine window reduces ripples in the frequency response - this is called the windowed-sinc method of designing FIR filters.
+//if we did not use the cosine window, the filter would have more ripples in the passband and stopband (Gibbs phenomenon).
+// "ripples" are variations in the frequency response that cause some frequencies (especially near the cutoff) to be
+        // amplified or attenuated more than others.
+//normalizing the filter coefficients would ensure that the sum of the coefficients equals 1.0, which means that
+        // the filter does not amplify or attenuate the overall signal level.
+        // This is important for preserving the signal's energy and preventing unwanted gain or loss.
+        // the energy of the filter is the sum of the squares of its coefficients.
+        // it is common practice to normalize the filter coefficients to ensure that the filter has a unity gain at DC (0 Hz).
+        // important because it prevents clipping and distortion in audio applications.
+        // in radar or sonar applications, it helps maintain the integrity of the received signal.
+
+
+//this is the constructor for the FIRFilter class. 
+//It initializes the delay line with zeros, sets the write index and sample count to zero, 
+//and calls the calculateCoefficients() method to compute the filter coefficients.
+FIRFilter::FIRFilter() : delay_line(FILTER_LENGTH, 0.0f), write_index(0), sample_count(0) { 
     calculateCoefficients();
 }
 
@@ -25,7 +44,7 @@ void FIRFilter::calculateCoefficients() {
     std::vector<float> full_coeffs(FILTER_LENGTH);
     float sum = 0.0f;
 
-    //calc all coefficients
+    //calc all coefficients by passing impulse through sinc function and cosine window
     for (int k = 0; k < FILTER_LENGTH; k++) {
         int n = k - N;
         double sinc_arg = (B / FS) * (n + 0.5);
