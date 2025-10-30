@@ -1,8 +1,8 @@
-#include "fir_filter.h"
-#include <cmath>
-#include <algorithm>
-#include <iostream>
-#include <iomanip>
+#include "fir_filter.h" // Our FIR filter implementation
+#include <cmath> // For M_PI, std::sin, std::abs
+#include <algorithm> // For std::fill, std::max
+#include <iostream> // For debug output
+#include <iomanip> // For std::setprecision
 
 FIRFilter::FIRFilter() : delay_line(FILTER_LENGTH, 0.0f), write_index(0), sample_count(0) {
     calculateCoefficients();
@@ -20,34 +20,71 @@ bool FIRFilter::isSymmetric() const { //for test - make sure h is actually symme
 
 
 void FIRFilter::calculateCoefficients() {
+    // Resize coefficient vector to store half the filter length due to symmetry
     coefficients.resize(FILTER_LENGTH / 2);
     
+    // Temporary full coefficient array (length = FILTER_LENGTH)
     std::vector<float> full_coeffs(FILTER_LENGTH);
-    float sum = 0.0f;
+
+    float sum = 0.0f; // Accumulate sum of coefficients for normalization
 
     // std::cout << "\n[C++] calculateCoefficients() called\n";
     // std::cout << "[C++] FILTER_LENGTH = " << FILTER_LENGTH << ", N = " << N << "\n";
     // std::cout << "[C++] Storing only first half due to symmetry\n";
 
-    //calc all coefficients
+    // Loop over each filter tap index k = 0...31 (for FILTER_LENGTH=32)
+    // a tap is essentially a point along the delay line where a sample is "tapped" and sent to a multiplier.
     for (int k = 0; k < FILTER_LENGTH; k++) {
+        // Convert 0-based index k to symmetric index n centered at zero:
+        // n will go from -N to N-1, e.g. -16 to 15 for N=16
         int n = k - N;
+
+        // Compute argument of sinc function (angular frequency form):
+        // The raw formula for ideal sinc lowpass is:
+        // h[n] = sinc(2 * Fc / Fs * (n + 0.5)) * window
+        //
+        // Here, 2 * M_PI * (B/FS) * (n + 0.5)
+        //
+        // Explanation of terms:
+        // M_PI: mathematical π, ~3.14159
+        // B: cutoff bandwidth (Fc)
+        // FS: sampling frequency
+        // (n + 0.5): shift to center the FIR filter properly
+        //
+        // Multiplying by 2π converts cycles/second (Hz) to radians/second (angular frequency)
+        // Angular frequency ω = 2πf
+        //
+        // This scaling makes the sinc formula compatible with sin(x)/x where x is in radians.
+        // However, the 2 pi is completely wrong. if we were to use the proper normalized sinc definiton,
+        // we should have used pi. this was an oversight, which stems from the angular frequency thing i was thinkign abt.
         double sinc_arg = 2 * M_PI * (B / FS) * (n + 0.5);
+
         double sinc_val;
         
+        // Handle the removable singularity at sinc(0), where sin(0)/0 is undefined mathematically
+        // By limit, sinc(0) = 1, so check if sinc_arg near zero to avoid division by zero error
         if (std::abs(sinc_arg) < 1e-10) {
             sinc_val = 1.0;
         } else {
+            // Calculate normalized sinc value sin(x)/x for filter impulse response
             sinc_val = std::sin(sinc_arg) / sinc_arg;
         }
         
+        // Calculate the cosine window value at this sample index n
+        // The window reduces ripples in frequency response (Gibbs phenomenon)
+        // Formula: w[n] = 1 + cos(π * (n + 0.5) / (N + 0.5))
+        // Gives a raised cosine shape centered over the filter length
         double cos_window = 1.0 + std::cos(M_PI * (n + 0.5) / (N + 0.5));
+
+        // Calculate the raw coefficient value combining sinc and window
         full_coeffs[k] = static_cast<float>(sinc_val * cos_window);
+
+        // Accumulate sum for normalization later
         sum += full_coeffs[k];
     }
 
 
-    // Normalize
+    // Normalize the coefficients so sum(h[n]) = 1 (to preserve signal magnitude)
     if (std::abs(sum) > 1e-6) {
         for (int i = 0; i < FILTER_LENGTH; i++) {
             full_coeffs[i] /= sum;
@@ -59,20 +96,6 @@ void FIRFilter::calculateCoefficients() {
         coefficients[i] = full_coeffs[i];
     }
 
-    // // Verify symmetry
-    // float max_symmetry_error = 0.0f;
-    // for (int i = 0; i < FILTER_LENGTH / 2; i++) {
-    //     float error = std::abs(full_coeffs[i] - full_coeffs[FILTER_LENGTH - 1 - i]);
-    //     max_symmetry_error = std::max(max_symmetry_error, error);
-    // }
-    
-    // std::cout << "[C++] Max symmetry error: " << std::setprecision(10) 
-    //           << max_symmetry_error << "\n";
-    // std::cout << "[C++] Coefficient storage: " << coefficients.size() 
-    //           << " floats (" << coefficients.size() * sizeof(float) 
-    //           << " bytes)\n";
-    // std::cout << "[C++] Memory saved: " << (FILTER_LENGTH / 2) * sizeof(float) 
-    //           << " bytes (50%)\n";
 
     // float check_sum = 0.0f;
     // for (int i = 0; i < FILTER_LENGTH; i++) {

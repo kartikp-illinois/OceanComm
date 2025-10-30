@@ -1,8 +1,8 @@
 #ifndef FIR_FILTER_H
 #define FIR_FILTER_H
 
-#include <vector>
-#include <cmath>
+#include <vector> // For std::vector
+#include <cmath> // For M_PI, std::sin, std::abs
 
 class FIRFilter {
 private:
@@ -12,9 +12,9 @@ private:
     static constexpr double FS = 100e3; //Sampling frequency
     static constexpr double B = 10e3; //Bandwidth
 
-    std::vector<float> coefficients;
-    std::vector<float> delay_line;
-    int write_index;
+    std::vector<float> coefficients; //stores first half of symmetric coefficients
+    std::vector<float> delay_line; //circular buffer for past samples
+    int write_index; //current position in delay_line
     long long sample_count;  //total samples processed
 
     void calculateCoefficients();
@@ -23,10 +23,10 @@ private:
 public:
     FIRFilter();
 
-    float process(float sample);
-    void reset();
+    float process(float sample); //process single sample
+    void reset(); //reset filter state
 
-    std::vector<float> getCoefficients() const { 
+    std::vector<float> getCoefficients() const { //for testing
         std::vector<float> full_coeffs(FILTER_LENGTH);
         for (int i = 0; i < FILTER_LENGTH / 2; i++) {
             full_coeffs[i] = coefficients[i];
