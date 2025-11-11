@@ -57,8 +57,3 @@ $$
 - Provide a high level summary of the resources required by your implementation (number of memory loads/stores, multiplies, additions, etc.)  
 - Provide a Python test bench for testing your solution. Designs that fail to pass their own test benches will not be considered. The test bench may use third-party libraries (e.g. NumPy)  
 
-## Exercise Submission  
-Submit your design source along with a `README.md` or script that describes the compile steps. Provide a link to a zip file download from Google Drive or similar. Your submission will be compiled and tested for correctness. Please ensure that your solution is submitted within 48 hours of receipt.  
-
-## Next Steps  
-The subsequent step of the interview process will allow you to give a short presentation on your solution with follow-up questions and discussion regarding your implementation.
